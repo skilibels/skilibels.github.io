@@ -320,7 +320,7 @@ function parseCSV(t){
 }
 const clean=rows=>rows.filter(r=>r&&r.length>1&&String(r[0]).trim().toLowerCase()!=='timestamp');
 async function viaCSV(url){
-  const res=await fetch(url+(url.includes('?')?'&':'?')+'_='+Date.now(),{cache:'no-store'});
+  const res=await fetch(url+(url.includes('?')?'&':'?')+'_='+Date.now()+Math.random().toString(36).slice(2),{cache:'no-store',headers:{'Cache-Control':'no-cache',Pragma:'no-cache'}});
   if(!res.ok)throw new Error('HTTP '+res.status);
   const t=await res.text();
   if(/^\s*<(!doctype|html)/i.test(t))throw new Error('akses ditolak');
@@ -337,29 +337,33 @@ function viaJSONP(){
       ok(clean((res.table.rows||[]).map(r=>(r.c||[]).map(c=>c&&c.v!=null?(c.f&&String(c.v).startsWith('Date(')?c.f:String(c.v)):''))));
     };
     s.onerror=()=>end(new Error('gagal dimuat'));
-    s.src=BASE+'/gviz/tq?tqx=out:json;responseHandler=hasilCb&_='+Date.now();
+    s.src=BASE+'/gviz/tq?tqx=out:json;responseHandler=hasilCb&_='+Date.now()+Math.random().toString(36).slice(2);
     document.head.appendChild(s);
   });
 }
-const PUB_CSV='https://docs.google.com/spreadsheets/d/e/2PACX-1vQdlxSwMU5lpZVQV1Ft1NKClraIszRl0HEWLApnW-ifQ-WjuQqqLWutXqgYdJ872FfHC4o0ASRJpuYv/pub?output=csv';
+/* Hanya membaca langsung dari spreadsheet (SHEET_ID). Link "publikasi ke web" (pub?output=csv)
+   dihapus karena di-cache Google +-5 menit sehingga menampilkan data lama. */
 const SOURCES=[
-  ['pub-csv',()=>viaCSV(PUB_CSV)],
-  ['gviz-csv',()=>viaCSV(BASE+'/gviz/tq?tqx=out:csv&headers=1')],
   ['jsonp',viaJSONP],
+  ['gviz-csv',()=>viaCSV(BASE+'/gviz/tq?tqx=out:csv&headers=1')],
   ['export-csv',()=>viaCSV(BASE+'/export?format=csv')]
 ];
 let busy=false;
+let lastCount=0; // jumlah baris pada tampilan terakhir, untuk mendeteksi data basi (cache)
 function setMsg(t,bad){const m=$('#msg');m.textContent=t;m.classList.toggle('bad',!!bad)}
 async function load(){
   if(busy)return;busy=true;$('#reload').disabled=true;setMsg('Memuat data...');
-  const errs=[];
+  const errs=[];let stale=null;
   for(const [name,fn] of SOURCES){
     try{
       const rows=await fn();
-      render(rows);setMsg('Data terbaru berhasil dimuat.');
+      if(rows.length<lastCount){ if(!stale)stale=rows; errs.push(name+': data lebih lama'); continue }
+      render(rows);lastCount=rows.length;setMsg('Data terbaru berhasil dimuat.');
       busy=false;$('#reload').disabled=false;return;
     }catch(e){errs.push(name+': '+(e&&e.message||e))}
   }
+  // semua sumber sepakat jumlahnya lebih sedikit (mis. baris dihapus di spreadsheet) -> terima
+  if(stale){render(stale);lastCount=stale.length;setMsg('Data terbaru berhasil dimuat.');busy=false;$('#reload').disabled=false;return}
   console.warn('Gagal memuat data:',errs);
   setMsg('Data gagal dimuat ('+errs.join('; ')+'). Pastikan spreadsheet dibagikan "Siapa saja yang memiliki link" dan halaman dibuka lewat internet.',true);
   busy=false;$('#reload').disabled=false;
